@@ -868,9 +868,14 @@ mod tests {
 
     #[test]
     fn session_dir_encodes_cwd_like_pi() {
-        let dir = session_dir_for("/home/tester");
+        // Pure string fixtures: `session_dir_for` only rewrites the *cwd text*
+        // into pi's session-dir slug (it never touches the input path on disk),
+        // and a real cwd is always absolute — `~` is a shell-level expansion the
+        // host never passes down. Only the `$HOME` prefix is machine-dependent,
+        // and that is resolved at runtime (`session_dir_for` reads `HOME`).
+        let dir = session_dir_for("/home/user");
         assert!(
-            dir.to_string_lossy().ends_with("/sessions/--home-tester--"),
+            dir.to_string_lossy().ends_with("/sessions/--home-user--"),
             "got {dir:?}"
         );
         let dir = session_dir_for("/home/u/.config/pi-desktop-chat-workspace");
