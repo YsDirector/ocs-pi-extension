@@ -124,7 +124,7 @@ STEPS = [
      "        for id in [\n            PanelId::Properties,\n            PanelId::BlockPalette,\n            PanelId::Pi,\n            PanelId::ExternalReferences,\n            PanelId::Browser,\n        ] {\n"),
     ("面板标题", "src/ui/dock.rs", "insert_after",
      '            PanelId::BlockPalette => "Block Palette",\n',
-     '            PanelId::Pi => "Pi 助手",\n'),
+     "            PanelId::Pi => crate::pi::panel_title(),\n"),
     ("默认宽度 340", "src/ui/dock.rs", "insert_after",
      "            PanelId::BlockPalette => 260.0,\n",
      "            // A chat column should not steal the drawing area by default.\n            PanelId::Pi => 340.0,\n"),

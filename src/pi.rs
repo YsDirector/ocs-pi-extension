@@ -338,8 +338,13 @@ fn http(endpoint: &str, method: &str, path: &str, body: Option<&str>, timeout: D
         .trim_start_matches("http://")
         .trim_end_matches('/')
         .to_string();
-    let mut stream = TcpStream::connect(&host_port)
-        .map_err(|e| format!("连接 {host_port} 失败：{e}"))?;
+    let mut stream = TcpStream::connect(&host_port).map_err(|e| {
+        tr_args(
+            "连接 {host_port} 失败：{e}",
+            "connection to {host_port} failed: {e}",
+            &[("host_port", host_port.clone()), ("e", e.to_string())],
+        )
+    })?;
     stream.set_read_timeout(Some(timeout)).ok();
     stream.set_write_timeout(Some(timeout)).ok();
     let payload = body.unwrap_or("");
@@ -351,7 +356,7 @@ fn http(endpoint: &str, method: &str, path: &str, body: Option<&str>, timeout: D
     let mut out = String::new();
     // Reading to EOF is fine: requests use `Connection: close`.
     if stream.read_to_string(&mut out).is_err() && out.is_empty() {
-        return Err("读取响应失败".into());
+        return Err(tr("读取响应失败", "reading response failed").into());
     }
     // Split status line, headers and body.
     let mut parts = out.splitn(2, "\r\n");
@@ -625,9 +630,9 @@ pub fn sse_to_events(ev: &serde_json::Value) -> Vec<Event> {
                         .map(content_text)
                         .unwrap_or_default();
                     let text = if text.is_empty() {
-                        "生成失败".to_string()
+                        tr("生成失败", "failed").to_string()
                     } else {
-                        format!("生成失败：{text}")
+                        tr_args("生成失败：{text}", "failed: {text}", &[("text", text)])
                     };
                     out.push(Event::StreamError(text));
                 }
@@ -719,7 +724,7 @@ pub fn sse_to_events(ev: &serde_json::Value) -> Vec<Event> {
                     let title = ev
                         .get("title")
                         .and_then(|t| t.as_str())
-                        .unwrap_or("需要确认")
+                        .unwrap_or(tr("需要确认", "confirmation needed"))
                         .to_string();
                     let message = ev
                         .get("message")
@@ -752,20 +757,24 @@ pub fn sse_to_events(ev: &serde_json::Value) -> Vec<Event> {
             }
         }
         "compaction_start" | "auto_compaction_start" => {
-            out.push(Event::Notice("上下文压缩中…".into()));
+            out.push(Event::Notice(tr("上下文压缩中…", "compacting context…").into()));
         }
         "compaction_end" | "auto_compaction_end" => {
-            out.push(Event::Notice("上下文压缩完成".into()));
+            out.push(Event::Notice(tr("上下文压缩完成", "context compacted").into()));
         }
         "auto_retry_start" => {
             let attempt = ev.get("attempt").and_then(|a| a.as_u64()).unwrap_or(0);
-            out.push(Event::Notice(format!("自动重试中（第 {attempt} 次）…")));
+            out.push(Event::Notice(tr_args(
+                "自动重试中（第 {attempt} 次）…",
+                "retrying (attempt {attempt})…",
+                &[("attempt", attempt.to_string())],
+            )));
         }
         "startup_error" => {
             let msg = ev
                 .get("errorMessage")
                 .and_then(|m| m.as_str())
-                .unwrap_or("pi-web 启动代理失败");
+                .unwrap_or(tr("pi-web 启动代理失败", "pi-web failed to start"));
             out.push(Event::Status(Status::Error(msg.to_string())));
         }
         // extension_ui_request (setWidget widgets), auto_retry_*, compaction_*,
@@ -939,7 +948,11 @@ fn worker(endpoint: String, tx: Sender<Event>, rx: Receiver<Command>, stop: Arc<
         let sessions = match http(&endpoint, "GET", "/api/sessions", None, REQUEST_TIMEOUT) {
             Ok(resp) if resp.status == 200 => parse_sessions(&resp.body),
             Ok(resp) => {
-                let msg = format!("pi-web /api/sessions 返回 {status}", status = resp.status);
+                let msg = tr_args(
+                    "pi-web /api/sessions 返回 {status}",
+                    "pi-web /api/sessions returned {status}",
+                    &[("status", resp.status.to_string())],
+                );
                 let _ = tx.send(Event::Status(Status::Error(msg)));
                 if wait_retry(&endpoint, &tx, &rx, &stop, &mut watch_target).is_break() {
                     return;
@@ -966,7 +979,9 @@ fn worker(endpoint: String, tx: Sender<Event>, rx: Receiver<Command>, stop: Arc<
             .filter(|id| sessions.iter().any(|s| s.id == *id))
             .or_else(|| sessions.first().map(|s| s.id.clone()));
         let Some(active) = active else {
-            let _ = tx.send(Event::Status(Status::Error("pi-web 没有会话".into())));
+            let _ = tx.send(Event::Status(Status::Error(
+                tr("pi-web 没有会话", "pi-web has no sessions").into(),
+            )));
             if wait_retry(&endpoint, &tx, &rx, &stop, &mut watch_target).is_break() {
                 return;
             }
@@ -1076,7 +1091,11 @@ fn worker(endpoint: String, tx: Sender<Event>, rx: Receiver<Command>, stop: Arc<
                                 }
                                 Err(e) => {
                                     let _ = tx.send(Event::SendFailed {
-                                        message: format!("新建会话失败：{e}"),
+                                        message: tr_args(
+                                            "新建会话失败：{e}",
+                                            "new session failed: {e}",
+                                            &[("e", e)],
+                                        ),
                                     });
                                 }
                             }
@@ -1157,17 +1176,29 @@ fn wait_retry(
             }
             Ok(Command::SetModel { .. }) => {
                 let _ = tx.send(Event::SendFailed {
-                    message: "切换模型失败：尚未连接 pi-web".into(),
+                    message: tr(
+                        "切换模型失败：尚未连接 pi-web",
+                        "model switch failed: pi-web not connected",
+                    )
+                    .into(),
                 });
             }
             Ok(Command::SetThinking { .. }) => {
                 let _ = tx.send(Event::SendFailed {
-                    message: "切换思考强度失败：尚未连接 pi-web".into(),
+                    message: tr(
+                        "切换思考强度失败：尚未连接 pi-web",
+                        "thinking level switch failed: pi-web not connected",
+                    )
+                    .into(),
                 });
             }
             Ok(Command::NewSession { .. }) => {
                 let _ = tx.send(Event::SendFailed {
-                    message: "新建会话失败：尚未连接 pi-web".into(),
+                    message: tr(
+                        "新建会话失败：尚未连接 pi-web",
+                        "new session failed: pi-web not connected",
+                    )
+                    .into(),
                 });
             }
             Ok(Command::Browse { .. }) | Ok(Command::FetchFiles { .. }) => {}
@@ -1280,7 +1311,9 @@ fn compact_session(endpoint: &str, tx: &Sender<Event>, session: &str) {
     match post_command(endpoint, session, "compact") {
         Ok(_) => {}
         Err(e) => {
-            let _ = tx.send(Event::SendFailed { message: format!("压缩失败：{e}") });
+            let _ = tx.send(Event::SendFailed {
+                message: tr_args("压缩失败：{e}", "compaction failed: {e}", &[("e", e)]),
+            });
         }
     }
 }
@@ -1310,7 +1343,11 @@ fn ui_respond(
         Some(&body.to_string()),
         REQUEST_TIMEOUT,
     ) {
-        let _ = tx.send(Event::Notice(format!("提交确认失败：{e}")));
+        let _ = tx.send(Event::Notice(tr_args(
+            "提交确认失败：{e}",
+            "confirmation submit failed: {e}",
+            &[("e", e)],
+        )));
     }
 }
 
@@ -1318,7 +1355,13 @@ fn ui_respond(
 fn set_model(endpoint: &str, tx: &Sender<Event>, session: &str, provider: &str, model_id: &str) {
     let body = serde_json::json!({ "type": "set_model", "provider": provider, "modelId": model_id });
     let fail = |tx: &Sender<Event>, message: String| {
-        let _ = tx.send(Event::SendFailed { message: format!("切换模型失败：{message}") });
+        let _ = tx.send(Event::SendFailed {
+            message: tr_args(
+                "切换模型失败：{message}",
+                "model switch failed: {message}",
+                &[("message", message)],
+            ),
+        });
     };
     match http(
         endpoint,
@@ -1483,10 +1526,22 @@ fn set_thinking(endpoint: &str, tx: &Sender<Event>, session: &str, level: &str) 
                 .ok()
                 .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
                 .unwrap_or_else(|| format!("HTTP {}", resp.status));
-            let _ = tx.send(Event::SendFailed { message: format!("切换思考强度失败：{detail}") });
+            let _ = tx.send(Event::SendFailed {
+                message: tr_args(
+                    "切换思考强度失败：{detail}",
+                    "thinking level switch failed: {detail}",
+                    &[("detail", detail)],
+                ),
+            });
         }
         Err(e) => {
-            let _ = tx.send(Event::SendFailed { message: format!("切换思考强度失败：{e}") });
+            let _ = tx.send(Event::SendFailed {
+                message: tr_args(
+                    "切换思考强度失败：{e}",
+                    "thinking level switch failed: {e}",
+                    &[("e", e)],
+                ),
+            });
         }
     }
 }
@@ -1590,7 +1645,7 @@ fn post_new_session(endpoint: &str, cwd: &str) -> Result<String, String> {
     serde_json::from_str::<serde_json::Value>(&resp.body)
         .ok()
         .and_then(|v| v.get("sessionId").and_then(|s| s.as_str()).map(str::to_string))
-        .ok_or_else(|| "响应缺少 sessionId".to_string())
+        .ok_or_else(|| tr("响应缺少 sessionId", "response is missing sessionId").to_string())
 }
 
 // ── `@file` reference expansion (mirrors pi CLI's `@file` arguments) ───────
@@ -1658,7 +1713,11 @@ pub fn expand_file_refs(
             path.to_path_buf()
         };
         let Ok(meta) = std::fs::metadata(&resolved) else {
-            notices.push(format!("未找到文件：{reference}"));
+            notices.push(tr_args(
+                "未找到文件：{reference}",
+                "file not found: {reference}",
+                &[("reference", reference)],
+            ));
             continue;
         };
         if meta.len() == 0 {
@@ -1673,11 +1732,19 @@ pub fn expand_file_refs(
         match ext.as_str() {
             "png" | "jpg" | "jpeg" | "webp" | "gif" => {
                 if meta.len() > FILE_REF_MAX_IMAGE_BYTES {
-                    notices.push(format!("图片过大，已跳过：{reference}"));
+                    notices.push(tr_args(
+                        "图片过大，已跳过：{reference}",
+                        "image too large, skipped: {reference}",
+                        &[("reference", reference)],
+                    ));
                     continue;
                 }
                 let Ok(bytes) = std::fs::read(&resolved) else {
-                    notices.push(format!("读取失败：{reference}"));
+                    notices.push(tr_args(
+                        "读取失败：{reference}",
+                        "read failed: {reference}",
+                        &[("reference", reference)],
+                    ));
                     continue;
                 };
                 let mime = match ext.as_str() {
@@ -1694,7 +1761,11 @@ pub fn expand_file_refs(
             }
             _ => {
                 if meta.len() > FILE_REF_MAX_TEXT_BYTES {
-                    notices.push(format!("文件过大（>512KB），已跳过：{reference}"));
+                    notices.push(tr_args(
+                        "文件过大（>512KB），已跳过：{reference}",
+                        "file too large (>512KB), skipped: {reference}",
+                        &[("reference", reference)],
+                    ));
                     continue;
                 }
                 match std::fs::read_to_string(&resolved) {
@@ -1703,7 +1774,11 @@ pub fn expand_file_refs(
                             "<file name=\"{absolute}\">\n{content}\n</file>\n"
                         ));
                     }
-                    Err(_) => notices.push(format!("读取失败（非文本？）：{reference}")),
+                    Err(_) => notices.push(tr_args(
+                        "读取失败（非文本？）：{reference}",
+                        "read failed (not text?): {reference}",
+                        &[("reference", reference)],
+                    )),
                 }
             }
         }
@@ -1743,6 +1818,98 @@ fn reader(stream: TcpStream, tx: Sender<Event>, is_streaming: Arc<AtomicBool>, d
         // `:` heartbeat comments and other lines are ignored.
     }
     done.store(true, Ordering::Relaxed);
+}
+
+// ── Panel language ──────────────────────────────────────────────────────────
+//
+// The panel ships two languages: Chinese (its original UI) and English (used
+// for every non-Chinese host). The **host's own resolved language decides**, so
+// picking a language in OCS's settings flips the panel too; `OCS_PI_LANG=zh|en`
+// overrides for testing. Resolution happens once per process (see `lang()`).
+
+/// Which language the panel renders in.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Lang {
+    Zh,
+    En,
+}
+
+static LANG: std::sync::OnceLock<Lang> = std::sync::OnceLock::new();
+
+/// The panel language. Cached: it is read while rendering, and the host's own
+/// language only changes from its settings dialog (restart to re-read, or set
+/// `OCS_PI_LANG`).
+pub fn lang() -> Lang {
+    *LANG.get_or_init(|| {
+        if let Ok(forced) = std::env::var("OCS_PI_LANG") {
+            if let Some(lang) = lang_from_override(&forced) {
+                return lang;
+            }
+        }
+        detect_lang()
+    })
+}
+
+/// `OCS_PI_LANG` parsing: `zh*` → Chinese, any other non-empty value → English,
+/// empty/blank → no override.
+fn lang_from_override(value: &str) -> Option<Lang> {
+    let value = value.trim().to_ascii_lowercase();
+    if value.is_empty() {
+        return None;
+    }
+    Some(if value.starts_with("zh") { Lang::Zh } else { Lang::En })
+}
+
+/// Locale tag → panel language. Only Chinese gets Chinese; everything else
+/// (including "no tag at all") is English.
+fn tag_to_lang(tag: Option<&str>) -> Lang {
+    match tag {
+        Some(tag) if tag.trim().to_ascii_lowercase().starts_with("zh") => Lang::Zh,
+        _ => Lang::En,
+    }
+}
+
+fn detect_lang() -> Lang {
+    // 1) What the host resolved (honours the user's choice in OCS settings).
+    let host = crate::i18n::loader()
+        .current_languages()
+        .into_iter()
+        .next()
+        .map(|language| language.to_string());
+    // 2) Otherwise the usual POSIX locale variables, in precedence order.
+    let tag = host.or_else(|| {
+        ["LC_ALL", "LC_MESSAGES", "LANG"]
+            .iter()
+            .find_map(|key| std::env::var(key).ok())
+    });
+    tag_to_lang(tag.as_deref())
+}
+
+/// `tr("中文", "English")` — one visible string, both languages.
+pub fn tr(zh: &'static str, en: &'static str) -> &'static str {
+    match lang() {
+        Lang::Zh => zh,
+        Lang::En => en,
+    }
+}
+
+/// Same, but the chosen template is interpolated with `{name}` placeholders
+/// (the same convention the host's `i18n::translate_args` uses), so formatted
+/// messages stay one call site instead of a `match` per string.
+pub fn tr_args(zh: &str, en: &str, args: &[(&str, String)]) -> String {
+    let mut out = match lang() {
+        Lang::Zh => zh.to_string(),
+        Lang::En => en.to_string(),
+    };
+    for (key, value) in args {
+        out = out.replace(&format!("{{{key}}}"), value);
+    }
+    out
+}
+
+/// Panel title, used by the dock chrome and the panel header.
+pub fn panel_title() -> &'static str {
+    tr("Pi 助手", "Pi Assistant")
 }
 
 /// Backend modes the panel can run in, in the order the picker shows them.
@@ -1804,6 +1971,49 @@ pub fn save_backend_mode(mode: &str) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn tr_follows_the_active_language_and_interpolates() {
+        // Written to hold in *either* language, so the suite passes on a Chinese
+        // and an English machine alike.
+        let zh = "中文样例";
+        let en = "english sample";
+        match lang() {
+            Lang::Zh => assert_eq!(tr(zh, en), zh),
+            Lang::En => assert_eq!(tr(zh, en), en),
+        }
+        let rendered = tr_args("失败：{e}", "failed: {e}", &[("e", "x".to_string())]);
+        match lang() {
+            Lang::Zh => assert_eq!(rendered, "失败：x"),
+            Lang::En => assert_eq!(rendered, "failed: x"),
+        }
+        // Placeholders never survive interpolation.
+        for text in [
+            tr_args("{a} 和 {b}", "{a} and {b}", &[("a", "1".into()), ("b", "2".into())]),
+            tr_args("没有占位", "no placeholder", &[]),
+        ] {
+            assert!(!text.contains('{') || !text.contains('}'));
+        }
+    }
+
+    #[test]
+    fn language_resolution_rules() {
+        // `OCS_PI_LANG`
+        assert_eq!(lang_from_override("zh"), Some(Lang::Zh));
+        assert_eq!(lang_from_override("zh-CN"), Some(Lang::Zh));
+        assert_eq!(lang_from_override(" ZH_TW "), Some(Lang::Zh));
+        assert_eq!(lang_from_override("en"), Some(Lang::En));
+        assert_eq!(lang_from_override("de-DE"), Some(Lang::En));
+        assert_eq!(lang_from_override("   "), None);
+        // locale tags: only Chinese is Chinese, everything else (incl. none) is English
+        assert_eq!(tag_to_lang(Some("zh_CN.UTF-8")), Lang::Zh);
+        assert_eq!(tag_to_lang(Some("zh")), Lang::Zh);
+        assert_eq!(tag_to_lang(Some("en-US")), Lang::En);
+        assert_eq!(tag_to_lang(Some("C.UTF-8")), Lang::En);
+        assert_eq!(tag_to_lang(None), Lang::En);
+        // the title is bilingual too
+        assert!(matches!(panel_title(), "Pi 助手" | "Pi Assistant"));
+    }
 
     #[test]
     fn backend_mode_round_trips_and_rejects_junk() {

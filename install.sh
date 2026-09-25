@@ -64,5 +64,6 @@ if [[ $check_only -eq 0 ]]; then
   OCS_PI_ENDPOINT=http://…    pi-web 端点
   OCS_PI_BIN=pi               pi 可执行文件（rpc 模式）
   OCS_PI_CWD=/path            新建会话/文件索引的默认目录（缺省 $HOME）
+  OCS_PI_LANG=zh|en           强制面板语言（缺省跟随宿主；非中文环境自动英文）
 EOF
 fi

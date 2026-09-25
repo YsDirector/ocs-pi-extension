@@ -131,7 +131,11 @@ pub fn worker(
                 }
             }
             Err(e) => {
-                let _ = tx.send(Event::Status(Status::Error(format!("启动 {bin} 失败：{e}"))));
+                let _ = tx.send(Event::Status(Status::Error(pi::tr_args(
+                    "启动 {bin} 失败：{e}",
+                    "failed to start {bin}: {e}",
+                    &[("bin", bin.clone()), ("e", e.to_string())],
+                ))));
                 match wait_retry(&tx, &rx, &stop) {
                     Exit::Stop => return,
                     Exit::Restart(Some(next)) => project_cwd = next,
@@ -165,7 +169,7 @@ fn wait_retry(tx: &Sender<Event>, rx: &Receiver<Command>, stop: &Arc<AtomicBool>
             Ok(Command::Watch(_)) => {}
             Ok(_) => {
                 let _ = tx.send(Event::SendFailed {
-                    message: "尚未连接 pi（rpc）".into(),
+                    message: pi::tr("尚未连接 pi（rpc）", "pi (rpc) not connected").into(),
                 });
             }
             Err(RecvTimeoutError::Timeout) => {}
@@ -191,10 +195,10 @@ fn serve(
     stop: &Arc<AtomicBool>,
 ) -> Exit {
     let Some(mut stdin) = child.stdin.take() else {
-        return Exit::Died("pi rpc 无 stdin".into());
+        return Exit::Died(pi::tr("pi rpc 无 stdin", "pi rpc has no stdin").into());
     };
     let (Some(stdout), Some(stderr)) = (child.stdout.take(), child.stderr.take()) else {
-        return Exit::Died("pi rpc 无输出管道".into());
+        return Exit::Died(pi::tr("pi rpc 无输出管道", "pi rpc has no output pipe").into());
     };
 
     // stdout → parsed JSON values
@@ -262,9 +266,17 @@ fn serve(
                 .map(|t| t.join("; "))
                 .unwrap_or_default();
             let detail = if tail.is_empty() {
-                format!("pi rpc 退出（{status}）")
+                pi::tr_args(
+                    "pi rpc 退出（{status}）",
+                    "pi rpc exited ({status})",
+                    &[("status", status.to_string())],
+                )
             } else {
-                format!("pi rpc 退出（{status}）：{tail}")
+                pi::tr_args(
+                    "pi rpc 退出（{status}）：{tail}",
+                    "pi rpc exited ({status}): {tail}",
+                    &[("status", status.to_string()), ("tail", tail)],
+                )
             };
             return Exit::Died(detail);
         }
@@ -325,9 +337,18 @@ fn serve(
                                     }
                                 } else {
                                     let _ = tx.send(Event::SendFailed {
-                                        message: format!(
-                                            "切换模型失败：{}",
-                                            data.as_str().unwrap_or("未知错误")
+                                        message: pi::tr_args(
+                                            "切换模型失败：{detail}",
+                                            "model switch failed: {detail}",
+                                            &[(
+                                                "detail",
+                                                data.as_str()
+                                                    .unwrap_or(pi::tr(
+                                                        "未知错误",
+                                                        "unknown error",
+                                                    ))
+                                                    .to_string(),
+                                            )],
                                         ),
                                     });
                                 }
@@ -339,9 +360,18 @@ fn serve(
                                     }
                                 } else {
                                     let _ = tx.send(Event::SendFailed {
-                                        message: format!(
-                                            "切换思考强度失败：{}",
-                                            data.as_str().unwrap_or("未知错误")
+                                        message: pi::tr_args(
+                                            "切换思考强度失败：{detail}",
+                                            "thinking level switch failed: {detail}",
+                                            &[(
+                                                "detail",
+                                                data.as_str()
+                                                    .unwrap_or(pi::tr(
+                                                        "未知错误",
+                                                        "unknown error",
+                                                    ))
+                                                    .to_string(),
+                                            )],
                                         ),
                                     });
                                 }
@@ -362,9 +392,18 @@ fn serve(
                                     paths_loaded = true;
                                 } else {
                                     let _ = tx.send(Event::SendFailed {
-                                        message: format!(
-                                            "切换会话失败：{}",
-                                            data.as_str().unwrap_or("未知错误")
+                                        message: pi::tr_args(
+                                            "切换会话失败：{detail}",
+                                            "session switch failed: {detail}",
+                                            &[(
+                                                "detail",
+                                                data.as_str()
+                                                    .unwrap_or(pi::tr(
+                                                        "未知错误",
+                                                        "unknown error",
+                                                    ))
+                                                    .to_string(),
+                                            )],
                                         ),
                                     });
                                 }
@@ -375,9 +414,18 @@ fn serve(
                             "compact" => {
                                 if !success {
                                     let _ = tx.send(Event::SendFailed {
-                                        message: format!(
-                                            "压缩失败：{}",
-                                            data.as_str().unwrap_or("未知错误")
+                                        message: pi::tr_args(
+                                            "压缩失败：{detail}",
+                                            "compaction failed: {detail}",
+                                            &[(
+                                                "detail",
+                                                data.as_str()
+                                                    .unwrap_or(pi::tr(
+                                                        "未知错误",
+                                                        "unknown error",
+                                                    ))
+                                                    .to_string(),
+                                            )],
                                         ),
                                     });
                                 }
@@ -385,9 +433,18 @@ fn serve(
                             "prompt" => {
                                 if !success {
                                     let _ = tx.send(Event::SendFailed {
-                                        message: format!(
-                                            "发送失败：{}",
-                                            data.as_str().unwrap_or("指令被拒绝")
+                                        message: pi::tr_args(
+                                            "发送失败：{detail}",
+                                            "send failed: {detail}",
+                                            &[(
+                                                "detail",
+                                                data.as_str()
+                                                    .unwrap_or(pi::tr(
+                                                        "指令被拒绝",
+                                                        "command rejected",
+                                                    ))
+                                                    .to_string(),
+                                            )],
                                         ),
                                     });
                                 }
@@ -408,7 +465,7 @@ fn serve(
                 }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
-                    return Exit::Died("pi rpc 输出结束".into())
+                    return Exit::Died(pi::tr("pi rpc 输出结束", "pi rpc output ended").into())
                 }
             }
         }
@@ -468,7 +525,7 @@ fn serve(
         match rx.recv_timeout(POLL) {
             Ok(Command::Send { message, image, queued, .. }) => {
                 if !send_prompt(&mut stdin, cwd, message, image, queued || streaming) {
-                    return Exit::Died("pi rpc stdin 已关闭".into());
+                    return Exit::Died(pi::tr("pi rpc stdin 已关闭", "pi rpc stdin closed").into());
                 }
             }
             Ok(Command::SetModel { provider, model_id }) => {
@@ -495,7 +552,11 @@ fn serve(
                         );
                     }
                     None => {
-                        let _ = tx.send(Event::Notice(format!("找不到会话文件：{id}")));
+                        let _ = tx.send(Event::Notice(pi::tr_args(
+                            "找不到会话文件：{id}",
+                            "session file not found: {id}",
+                            &[("id", id)],
+                        )));
                     }
                 }
             }

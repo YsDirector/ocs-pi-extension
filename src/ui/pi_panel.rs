@@ -27,6 +27,8 @@ use crate::pi::{self, Entry, Event, Part, Status};
 
 /// Scrollable widget id of the transcript (for scroll-to-bottom).
 pub const TRANSCRIPT_ID: &str = "pi_transcript_scroll";
+
+
 /// Fixed composer height in px.
 const COMPOSER_H: f32 = 72.0;
 /// Muted-but-readable grey for the composer hint and the stats line
@@ -300,9 +302,9 @@ enum Badge {
 impl Badge {
     fn label(self) -> &'static str {
         match self {
-            Badge::Running => "运行中…",
-            Badge::Done => "完成",
-            Badge::Failed => "出错",
+            Badge::Running => pi::tr("运行中…", "running…"),
+            Badge::Done => pi::tr("完成", "done"),
+            Badge::Failed => pi::tr("出错", "failed"),
         }
     }
 
@@ -506,14 +508,28 @@ impl PiPanelState {
     /// Human-readable status for the status strip.
     pub fn status_label(&self) -> String {
         match &self.status {
-            PiStatus::Idle => "未连接".to_string(),
-            PiStatus::Connecting => "正在连接 pi-web…".to_string(),
-            PiStatus::Ready { session, streaming } => {
-                let dot = if *streaming { "● 生成中" } else { "○ 空闲" };
-                let short: String = session.chars().take(8).collect();
-                format!("{dot} · 会话 {short}")
+            PiStatus::Idle => pi::tr("未连接", "not connected").to_string(),
+            PiStatus::Connecting => {
+                pi::tr("正在连接…", "connecting…").to_string()
             }
-            PiStatus::Error(e) => format!("连接失败：{e}"),
+            PiStatus::Ready { session, streaming } => {
+                let dot = if *streaming {
+                    pi::tr("● 生成中", "● generating")
+                } else {
+                    pi::tr("○ 空闲", "○ idle")
+                };
+                let short: String = session.chars().take(8).collect();
+                pi::tr_args(
+                    "{dot} · 会话 {short}",
+                    "{dot} · session {short}",
+                    &[("dot", dot.to_string()), ("short", short)],
+                )
+            }
+            PiStatus::Error(e) => pi::tr_args(
+                "连接失败：{e}",
+                "connection failed: {e}",
+                &[("e", e.clone())],
+            ),
         }
     }
 
@@ -751,7 +767,11 @@ impl PiPanelState {
                         self.entries.remove(pos);
                     }
                 }
-                self.push_kind(PiEntryKind::Notice(format!("发送失败：{message}")));
+                self.push_kind(PiEntryKind::Notice(pi::tr_args(
+                    "发送失败：{message}",
+                    "send failed: {message}",
+                    &[("message", message)],
+                )));
                 true
             }
         }
@@ -1123,7 +1143,7 @@ fn header(auto_collapse: bool) -> Element<'static, Message> {
     mouse_area(
         container(
             row![
-                text("Pi 助手").size(12),
+                text(crate::pi::panel_title()).size(12),
                 Space::new().width(Length::Fill),
                 pin,
                 close,
@@ -1227,13 +1247,13 @@ fn session_picker(state: &PiPanelState) -> Element<'_, Message> {
         .and_then(|id| state.sessions.iter().find(|s| &s.id == id));
     let label = |s: &pi::SessionInfo| {
         if s.label.is_empty() {
-            "（无标题会话）".to_string()
+            pi::tr("（无标题会话）", "(untitled session)").to_string()
         } else {
             s.label.clone()
         }
     };
     let picker = pick_list(selected, state.sessions.as_slice(), label)
-        .placeholder("选择会话…")
+        .placeholder(pi::tr("选择会话…", "pick a session…"))
         .width(Length::Fill)
         .text_size(11)
         .padding([2, 6])
@@ -1279,8 +1299,14 @@ fn status_strip(state: &PiPanelState) -> Element<'_, Message> {
             .menu_height(120.0)
             .on_select(|m: String| Message::Pi(PiMsg::BackendPick(m))),
         column![
-            tooltip_label("auto：优先 pi-web，没有就用本机 pi"),
-            tooltip_label("rpc：只跑本机 pi，不需要 pi-web"),
+            tooltip_label(pi::tr(
+                "auto：优先 pi-web，没有就用本机 pi",
+                "auto: prefer pi-web, fall back to local pi",
+            )),
+            tooltip_label(pi::tr(
+                "rpc：只跑本机 pi，不需要 pi-web",
+                "rpc: run local pi only, no pi-web needed",
+            )),
         ]
         .spacing(2),
         tooltip::Position::Bottom,
@@ -1300,7 +1326,14 @@ fn status_strip(state: &PiPanelState) -> Element<'_, Message> {
     .spacing(4)
     .align_y(iced::Center);
     if errored || idle {
-        let reconnect = button(text(if idle { "连接" } else { "重连" }).size(10))
+        let reconnect = button(
+            text(if idle {
+                pi::tr("连接", "Connect")
+            } else {
+                pi::tr("重连", "Reconnect")
+            })
+            .size(10),
+        )
             .on_press(Message::Pi(PiMsg::Reconnect))
             .style(|theme: &Theme, status| button::subtle(theme, status))
             .padding([2, 6]);
@@ -1316,12 +1349,12 @@ fn entry_view<'a>(e: &'a PiEntry, theme: &'a Theme) -> Element<'a, Message> {
         PiEntryKind::User(t) => {
             // Image-only sends carry no text; show a camera placeholder.
             let body = if t.is_empty() {
-                "📷 截图".to_string()
+                pi::tr("📷 截图", "📷 screenshot").to_string()
             } else {
                 t.clone()
             };
             container(
-                column![tag_label("你"), text(body).size(12)]
+                column![tag_label(pi::tr("你", "you")), text(body).size(12)]
                     .spacing(2)
                     .width(Length::Fill),
             )
@@ -1346,7 +1379,12 @@ fn entry_view<'a>(e: &'a PiEntry, theme: &'a Theme) -> Element<'a, Message> {
         .width(Length::Fill)
         .into(),
         PiEntryKind::Thinking(t) => {
-            let head = toggle_row("思考".to_string(), None, e.expanded, e.id);
+            let head = toggle_row(
+                pi::tr("思考", "thinking").to_string(),
+                None,
+                e.expanded,
+                e.id,
+            );
             let mut body = column![head].spacing(4).padding([2, 4]).width(Length::Fill);
             if e.expanded && !t.is_empty() {
                 body = body.push(
@@ -1368,8 +1406,12 @@ fn entry_view<'a>(e: &'a PiEntry, theme: &'a Theme) -> Element<'a, Message> {
             } else {
                 Badge::Done
             };
-            let head =
-                toggle_row(format!("工具 · {name}"), Some(badge), e.expanded, e.id);
+            let head = toggle_row(
+                pi::tr_args("工具 · {name}", "tool · {name}", &[("name", name.to_string())]),
+                Some(badge),
+                e.expanded,
+                e.id,
+            );
             let mut body = column![head].spacing(4).padding([2, 4]).width(Length::Fill);
             if e.expanded && !output.is_empty() {
                 body = body.push(
@@ -1467,7 +1509,12 @@ fn streaming_view<'a>(state: &'a PiPanelState, theme: &'a Theme) -> Option<Eleme
                 // toggle id is stable across deltas so expand state holds.
                 let id = PiPanelState::live_block_id(*idx, "t");
                 let expanded = state.live_expanded.contains(&id);
-                let head = toggle_row("思考中…".to_string(), None, expanded, id);
+                let head = toggle_row(
+                    pi::tr("思考中…", "thinking…").to_string(),
+                    None,
+                    expanded,
+                    id,
+                );
                 let mut body = column![head].spacing(4).padding([2, 4]).width(Length::Fill);
                 if expanded && !t.is_empty() {
                     body = body.push(
@@ -1516,18 +1563,34 @@ fn empty_state(state: &PiPanelState) -> Element<'static, Message> {
         PiStatus::Error(_) => {
             // Both backends are mentioned: with `OCS_PI_MODE=rpc` no pi-web is
             // needed at all (pi is spawned directly).
-            "未连接。\n· pi-web 后端：先启动 pi-web（默认 http://127.0.0.1:30141）\n· rpc 后端：在状态条把后端切到 rpc（只需本机 pi，无需 pi-web）\n端点可用 OCS_PI_ENDPOINT 覆盖，模式可用 OCS_PI_MODE=auto|web|rpc 覆盖。".to_string()
+            pi::tr(
+                "未连接。\n· pi-web 后端：先启动 pi-web（默认 http://127.0.0.1:30141）\n· rpc 后端：在状态条把后端切到 rpc（只需本机 pi，无需 pi-web）\n端点可用 OCS_PI_ENDPOINT 覆盖，模式可用 OCS_PI_MODE=auto|web|rpc 覆盖。",
+                "not connected.\n· pi-web backend: start pi-web first (default http://127.0.0.1:30141)\n· rpc backend: switch the backend to rpc in the status strip (local pi only, no pi-web needed)\nThe endpoint can be overridden with OCS_PI_ENDPOINT, the mode with OCS_PI_MODE=auto|web|rpc.",
+            )
+            .to_string()
         }
         PiStatus::Ready { .. } if state.sessions.is_empty() => {
-            "pi-web 没有会话。\n在网页端新建一个会话后，本面板会自动跟随。".to_string()
+            pi::tr(
+                "pi-web 没有会话。\n在网页端新建一个会话后，本面板会自动跟随。",
+                "pi-web has no sessions.\nCreate one in the web UI and this panel will follow it.",
+            )
+            .to_string()
         }
-        PiStatus::Ready { .. } => "暂无消息 — 在下方输入框发送第一条".to_string(),
-        PiStatus::Connecting => "正在连接…".to_string(),
-        PiStatus::Idle => "未连接 — 点击上方「连接」开始".to_string(),
+        PiStatus::Ready { .. } => pi::tr(
+            "暂无消息 — 在下方输入框发送第一条",
+            "no messages yet — send the first one below",
+        )
+        .to_string(),
+        PiStatus::Connecting => pi::tr("正在连接…", "connecting…").to_string(),
+        PiStatus::Idle => pi::tr(
+            "未连接 — 点击上方「连接」开始",
+            "not connected — click Connect above to start",
+        )
+        .to_string(),
     };
     container(
         column![
-            text("Pi 助手").size(13),
+            text(crate::pi::panel_title()).size(13),
             // Full-contrast body text: the empty-state hint carries setup
             // instructions the user must read, so a dim secondary gray is
             // not enough (视觉验收曾点名对比度不足).
@@ -1566,7 +1629,15 @@ fn composer<'a>(
             .map(|(w, h)| format!(" {}×{}", w, h))
             .unwrap_or_default();
         let chip = row![
-            text(format!("📷 截图（{} KB）{}", img.base64.len() * 3 / 4 / 1024, dims)).size(10),
+            text(pi::tr_args(
+                "📷 截图（{kb} KB）{dims}",
+                "📷 screenshot ({kb} KB){dims}",
+                &[
+                    ("kb", (img.base64.len() * 3 / 4 / 1024).to_string()),
+                    ("dims", dims),
+                ],
+            ))
+            .size(10),
             Space::new().width(Length::Fill),
             button(text("✕").size(10))
                 .on_press(Message::Pi(PiMsg::ClearImage))
@@ -1612,7 +1683,10 @@ fn composer<'a>(
     };
 
     let editor = text_editor(&state.input)
-        .placeholder("向 Pi 发送…（Enter 发送 / Shift+Enter 换行）")
+        .placeholder(pi::tr(
+            "向 Pi 发送…（Enter 发送 / Shift+Enter 换行）",
+            "message Pi… (Enter to send / Shift+Enter for newline)",
+        ))
         .size(12)
         .height(Length::Fixed(COMPOSER_H))
         .padding(4)
@@ -1650,7 +1724,7 @@ fn composer<'a>(
         })
         .on_action(|a| Message::Pi(PiMsg::Editor(a)));
 
-    let send = button(text("发送").size(11))
+    let send = button(text(pi::tr("发送", "Send")).size(11))
         .on_press_maybe(can_send.then(|| Message::Pi(PiMsg::Send)))
         .style(move |theme: &Theme, status| {
             let mut style = button::subtle(theme, status);
@@ -1664,13 +1738,25 @@ fn composer<'a>(
         .padding([4, 10]);
 
     let mut hint_text = if state.is_streaming() {
-        "Pi 生成中…Enter 会排队为后续消息".to_string()
+        pi::tr(
+            "Pi 生成中…Enter 会排队为后续消息",
+            "Pi is generating… Enter queues a follow-up",
+        )
+        .to_string()
     } else {
-        "Enter 发送 / Shift+Enter 换行".to_string()
+        pi::tr(
+            "Enter 发送 / Shift+Enter 换行",
+            "Enter to send / Shift+Enter for newline",
+        )
+        .to_string()
     };
     if let Some(n) = state.queued_followups {
         if n > 0 {
-            hint_text = format!("已排队 {n} 条 · {hint_text}");
+            hint_text = pi::tr_args(
+                "已排队 {n} 条 · {hint_text}",
+                "{n} queued · {hint_text}",
+                &[("n", n.to_string()), ("hint_text", hint_text)],
+            );
         }
     }
     let hint = text(hint_text)
@@ -1694,7 +1780,7 @@ fn composer<'a>(
             state.models.as_slice(),
             move |m: &pi::ModelInfo| m.name.clone(),
         )
-        .placeholder("模型…")
+        .placeholder(pi::tr("模型…", "model…"))
         .width(Length::Fill)
         .text_size(11)
         .padding([2, 6])
@@ -1720,8 +1806,10 @@ fn composer<'a>(
                 .as_ref()
                 .and_then(|c| levels.iter().find(|l| *l == c).cloned());
             row = row.push(
-                pick_list(selected, levels, move |l: &String| format!("思考:{l}"))
-                    .placeholder("思考…")
+                pick_list(selected, levels, move |l: &String| {
+                    pi::tr_args("思考:{l}", "thinking:{l}", &[("l", l.to_string())])
+                })
+                    .placeholder(pi::tr("思考…", "thinking…"))
                     .width(Length::Fixed(96.0))
                     .text_size(11)
                     .padding([2, 6])
@@ -1730,7 +1818,7 @@ fn composer<'a>(
             );
         }
         // Manual context compaction (disabled while a run is streaming).
-        let compact = button(text("压缩").size(10))
+        let compact = button(text(pi::tr("压缩", "Compact")).size(10))
             .on_press_maybe(
                 (!state.is_streaming()).then_some(Message::Pi(PiMsg::Compact)),
             )
@@ -1752,12 +1840,15 @@ fn composer<'a>(
                     n.to_string()
                 }
             };
-            let mut line = format!(
-                "↑{} ↓{} · 缓存 {}/{}",
-                short(stats.input),
-                short(stats.output),
-                short(stats.cache_read),
-                short(stats.cache_write),
+            let mut line = pi::tr_args(
+                "↑{input} ↓{output} · 缓存 {read}/{write}",
+                "↑{input} ↓{output} · cache {read}/{write}",
+                &[
+                    ("input", short(stats.input)),
+                    ("output", short(stats.output)),
+                    ("read", short(stats.cache_read)),
+                    ("write", short(stats.cache_write)),
+                ],
             );
             if let (Some(tokens), Some(window)) = (stats.context_tokens, stats.context_window) {
                 // pi-web may report `percent: null`（压缩后）；兜底自算。
@@ -1767,10 +1858,15 @@ fn composer<'a>(
                     .or_else(|| (window > 0).then(|| tokens * 100 / window))
                     .map(|p| format!("{p}%"))
                     .unwrap_or_default();
-                line = format!(
-                    "{line} · 上下文 {percent}（{}/{}）",
-                    short(tokens),
-                    short(window)
+                line = pi::tr_args(
+                    "{line} · 上下文 {percent}（{tokens}/{window}）",
+                    "{line} · context {percent} ({tokens}/{window})",
+                    &[
+                        ("line", line.clone()),
+                        ("percent", percent),
+                        ("tokens", short(tokens)),
+                        ("window", short(window)),
+                    ],
                 );
             }
             if let Some(cost) = stats.cost {
@@ -1897,7 +1993,7 @@ fn ui_request_view<'a>(
         }
         "confirm" => {
             actions = actions.push(
-                button(text("允许").size(10))
+                button(text(pi::tr("允许", "Allow")).size(10))
                     .on_press(Message::Pi(PiMsg::UiAnswer {
                         value: None,
                         confirmed: Some(true),
@@ -1912,7 +2008,7 @@ fn ui_request_view<'a>(
                     .padding([3, 10]),
             );
             actions = actions.push(
-                button(text("拒绝").size(10))
+                button(text(pi::tr("拒绝", "Deny")).size(10))
                     .on_press(Message::Pi(PiMsg::UiAnswer {
                         value: None,
                         confirmed: Some(false),
@@ -1924,7 +2020,7 @@ fn ui_request_view<'a>(
         // `input` / `editor`: answer with the free-text editor above.
         _ => {
             actions = actions.push(
-                button(text("确定").size(10))
+                button(text(pi::tr("确定", "OK")).size(10))
                     .on_press(Message::Pi(PiMsg::UiSubmit))
                     .style(|theme: &Theme, status| {
                         let mut style = button::subtle(theme, status);
@@ -1939,7 +2035,7 @@ fn ui_request_view<'a>(
     }
     actions = actions.push(Space::new().width(Length::Fill));
     actions = actions.push(
-        button(text("取消").size(10))
+        button(text(pi::tr("取消", "Cancel")).size(10))
             .on_press(Message::Pi(PiMsg::UiCancel))
             .style(|theme: &Theme, status| button::subtle(theme, status))
             .padding([3, 8]),
@@ -2048,7 +2144,7 @@ fn browse_view(browse: &BrowseState) -> Element<'_, Message> {
     let mut list = column![].spacing(1).width(Length::Fill);
     if browse.loading {
         list = list.push(
-            text("读取目录…")
+            text(pi::tr("读取目录…", "reading directory…"))
                 .size(10)
                 .style(|theme: &Theme| iced::widget::text::Style {
                     color: Some(secondary_color(theme)),
@@ -2067,7 +2163,7 @@ fn browse_view(browse: &BrowseState) -> Element<'_, Message> {
     }
     if browse.dirs.is_empty() && !browse.loading {
         list = list.push(
-            text("（没有子目录）")
+            text(pi::tr("（没有子目录）", "(no subdirectories)"))
                 .size(10)
                 .style(|theme: &Theme| iced::widget::text::Style {
                     color: Some(secondary_color(theme)),
@@ -2075,7 +2171,7 @@ fn browse_view(browse: &BrowseState) -> Element<'_, Message> {
         );
     }
     let header = row![
-        button(text("↑ 上级").size(10))
+        button(text(pi::tr("↑ 上级", "↑ Up")).size(10))
             .on_press(Message::Pi(PiMsg::DirUp))
             .style(|theme: &Theme, status| button::subtle(theme, status))
             .padding([2, 6]),
@@ -2089,7 +2185,7 @@ fn browse_view(browse: &BrowseState) -> Element<'_, Message> {
     .spacing(4)
     .align_y(iced::Center);
     let actions = row![
-        button(text("在此新建会话").size(10))
+        button(text(pi::tr("在此新建会话", "New session here")).size(10))
             .on_press(Message::Pi(PiMsg::CreateSession))
             .style(|theme: &Theme, status| {
                 let mut style = button::subtle(theme, status);
@@ -2099,7 +2195,7 @@ fn browse_view(browse: &BrowseState) -> Element<'_, Message> {
             })
             .padding([3, 8]),
         Space::new().width(Length::Fill),
-        button(text("取消").size(10))
+        button(text(pi::tr("取消", "Cancel")).size(10))
             .on_press(Message::Pi(PiMsg::NewSessionCancel))
             .style(|theme: &Theme, status| button::subtle(theme, status))
             .padding([3, 8]),
@@ -2343,6 +2439,6 @@ mod tests {
         s.apply(Event::Status(Status::Ready { session: "abc".into(), streaming: true }));
         assert_eq!(s.active.as_deref(), Some("abc"));
         assert!(s.is_streaming());
-        assert!(s.status_label().contains("生成中"));
+        assert!(s.status_label().contains(crate::pi::tr("生成中", "generating")));
     }
 }

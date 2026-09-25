@@ -239,7 +239,11 @@ impl OpenCADStudio {
         match payload {
             Ok(image) => {
                 let fail = |panel: &mut crate::ui::pi_panel::PiPanelState, message: String| {
-                    panel.push_notice(format!("粘贴图片失败：{message}"));
+                    panel.push_notice(crate::pi::tr_args(
+                        "粘贴图片失败：{message}",
+                        "pasting the image failed: {message}",
+                        &[("message", message)],
+                    ));
                 };
                 let mut img = match image::RgbaImage::from_raw(
                     image.size.width,
@@ -248,7 +252,10 @@ impl OpenCADStudio {
                 ) {
                     Some(img) => img,
                     None => {
-                        fail(&mut self.tabs[tab].pi_panel, "图像数据异常".into());
+                        fail(
+                            &mut self.tabs[tab].pi_panel,
+                            crate::pi::tr("图像数据异常", "invalid image data").into(),
+                        );
                         return Task::none();
                     }
                 };
@@ -271,11 +278,17 @@ impl OpenCADStudio {
                     .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
                     .is_err()
                 {
-                    fail(&mut self.tabs[tab].pi_panel, "PNG 编码失败".into());
+                    fail(
+                        &mut self.tabs[tab].pi_panel,
+                        crate::pi::tr("PNG 编码失败", "PNG encoding failed").into(),
+                    );
                     return Task::none();
                 }
                 if png.len() > 8 * 1024 * 1024 {
-                    fail(&mut self.tabs[tab].pi_panel, "图片过大（>8 MB）".into());
+                    fail(
+                        &mut self.tabs[tab].pi_panel,
+                        crate::pi::tr("图片过大（>8 MB）", "image too large (>8 MB)").into(),
+                    );
                     return Task::none();
                 }
                 let size = (img.width(), img.height());
@@ -329,12 +342,25 @@ fn selection_label(scene: &crate::scene::Scene) -> String {
     }
     match by_type.iter().next() {
         // One object, or several of one kind → the kind name; mixed → 全部.
-        Some((kind, count)) if by_type.len() == 1 => format!(
-            "{}（{}）",
-            crate::t!(crate::app::helpers::title_case_word(kind)),
-            count
+        Some((kind, count)) if by_type.len() == 1 => crate::pi::tr_args(
+            "{kind}（{count}）",
+            "{kind} ({count})",
+            &[
+                (
+                    "kind",
+                    crate::t!(crate::app::helpers::title_case_word(kind)).to_string(),
+                ),
+                ("count", count.to_string()),
+            ],
         ),
-        _ => format!("{}（{}）", crate::t!("All"), n),
+        _ => crate::pi::tr_args(
+            "{kind}（{count}）",
+            "{kind} ({count})",
+            &[
+                ("kind", crate::t!("All").to_string()),
+                ("count", n.to_string()),
+            ],
+        ),
     }
 }
 

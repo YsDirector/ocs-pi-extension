@@ -63,7 +63,7 @@ Phase 2 功能清单（用户已定案：工具/思考默认折叠、流式中�
 - 面板 `view(width, …)` 必须 `.width(Length::Fixed(width))`（正确范例 `src/ui/properties.rs`）。
 - dock 配置：`~/.config/OpenCADStudio/settings.json` 顶层 `dock` 键；**改配置先关 OCS**。
   当前：`pi: {width: 347.6, auto_collapse: false}`。
-- 构建/重启：`cargo build --release` → 重启 OCS（`pkill -x OpenCADStudio` 后从菜单/命令行重新启动）。
+- 构建/重启：`cargo build --release`（≈1.5min）→ `pkill -x OpenCADStudio` → `bash /tmp/launch-ocs.sh 1178`。
   自动化接口：`mcporter call ocs.ocs_sessions` → `ocs.ocs_execute {request:{op:"run",cmd:"PI"},ocs_session_id,request_id}`（**request_id 在 request 对象里**）。
   欢迎页不渲染停靠栏，先 `op:"new"`。
 
@@ -291,3 +291,19 @@ queue_update、compaction_*、auto_retry_*、extension_error），**现有 `sse_
 **踩坑**：`markdown::Content` 非 `Clone`、`Row` 不换行而是压缩子元素（见 §9）之外，本次新的：
 iced 的 `Scrollable` 在所用 rev 里**没有 `max_height()`**（只有 `height()`），要"内容少时自适应、
 多时封顶"只能按条目数分支选 `Length::Shrink` / `Length::Fixed(n)`。
+
+## 13. 英文界面（2026-09-25）
+
+面板原本只有中文。现在**跟随宿主语言**：OCS 解析出中文（`zh-CN`/`zh-TW`，或 `LC_ALL`/`LC_MESSAGES`/`LANG` 以 `zh`
+开头）→ 中文界面；**其余一律英文**，因此非中文机器上开箱即英文。`OCS_PI_LANG=zh|en` 可强制（截图/测试用）。
+
+实现（全部在 4 个 Pi 文件内，**不新增宿主接点、不动宿主 .ftl 语言目录**）：
+
+- `src/pi.rs` 里的小核心：`Lang` / `lang()`（进程内 `OnceLock` 缓存）/ `tr(zh, en)` /
+  `tr_args(zh, en, &[("name", value)])`（`{name}` 占位替换，与宿主 `i18n::translate_args` 同款约定）/
+  `panel_title()`。
+- 判定顺序：① 宿主 `crate::i18n::loader().current_languages()` 的第一个语言标签（这样**用户在 OCS 设置里改语言
+  也会跟着变**）；② 环境变量 `LC_ALL` > `LC_MESSAGES` > `LANG`；③ 都没有 → 英文。
+- 停靠面板标题改走 `crate::ui::pi_panel::panel_title()`（原来是字面量 `"Pi 助手"`）。
+- 缓存是一次性的：OCS 运行中改语言要重启面板才生效（或用 `OCS_PI_LANG`）。
+- 测试断言 UI 文案时用 `crate::pi::tr("中文","English")` 而不是硬编码中文，这样中英环境下都通过。

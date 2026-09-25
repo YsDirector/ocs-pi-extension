@@ -4,13 +4,10 @@ A **native chat panel for [OpenCADStudio](https://github.com/HakanSeven12/OpenCA
 [pi](https://github.com/badlogic/pi-mono) coding agent — the same agent surface as the pi CLI/TUI, docked next to
 your drawing, drawn with OCS's own iced widgets (no embedded browser, works on X11 **and** Wayland).
 
-```
-┌ Pi 助手 ─────────────────────────────────────────────┐
-│ 读一下这张图的标注层，把不符合 GB/T 4458.4 的挑出来   │
-│ ● Pi  ↑4.5M ↓374.7k · 缓存 343.9M/0 · 上下文 68% · $6.2 │
-│ ▸ 思考   ▸ 工具·read 完成   ▸ 工具·bash 完成          │
-└──────────────────────────────────────────────────────┘
-```
+![OCS Pi panel docked on the right, with the status strip, transcript and composer](docs/panel.png)
+
+The screenshot above is the Chinese UI; on a non-Chinese host the same panel renders in English (see
+[Language](#language)).
 
 * **Two backends, switchable in the panel**
   * `rpc` — spawns a local `pi --mode rpc` child process. **No pi-web required.**
@@ -72,9 +69,18 @@ like the Properties palette — drag it to another edge, resize it, pin or close
 | `OCS_PI_ENDPOINT` | pi-web endpoint (`web`/`auto`) | `http://127.0.0.1:30141` |
 | `OCS_PI_BIN` | `pi` executable (`rpc`) | `pi` (searched on `PATH`, then `~/.local/bin`, `~/.npm-global/bin`, `~/.cargo/bin`) |
 | `OCS_PI_CWD` | project dir for new sessions and the `@file` index | `$HOME` |
+| `OCS_PI_LANG` | force the panel language (`zh` / `en`) | host language |
 
 The backend picker writes its choice to `~/.config/OpenCADStudio/pi-panel-backend.txt`, which takes precedence over
 `OCS_PI_MODE` (deliberate: the panel is an add-on, so its preference stays out of OCS's own `settings.json`).
+
+### Language
+
+The panel ships **Chinese** and **English**. It follows the host: if OpenCADStudio resolves a Chinese locale
+(`zh-CN` / `zh-TW`, or a `zh*` value in `LC_ALL` / `LC_MESSAGES` / `LANG`) the panel renders Chinese, and **anything
+else renders English** — so on a non-Chinese machine the panel is English out of the box. `OCS_PI_LANG=zh|en`
+overrides it (handy for screenshots and tests), and changing the language in OCS's own settings applies on the next
+start.
 
 ## Repository layout
 
@@ -90,8 +96,6 @@ docs/DESIGN.zh.md              design notes / rationale / war stories (Chinese)
 
 ## Known limitations
 
-* **UI strings are Chinese** (the panel was written for a Chinese-speaking user). English strings are welcome as
-  a PR.
 * Single-user desktop app: the panel spawns a local `pi` process and reads `~/.pi/agent/sessions/**`; there is no
   remote/multi-user mode.
 * The `web` backend needs pi-web's HTTP API; `rpc` needs the `pi` CLI. If neither is present the panel shows an
